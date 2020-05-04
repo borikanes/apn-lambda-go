@@ -13,7 +13,6 @@ import (
         "log"
         "net/http"
         "os"
-        "strconv"
         "time"
 
 )
@@ -59,7 +58,7 @@ type LambdaResponse struct {
     Base64Encoded bool `json:"isBase64Encoded"`
     Headers map[string]string `json:"headers"`
     Message string `json:"message"`
-    StatusCode string `json:"statusCode"`
+    StatusCode int `json:"statusCode"`
 }
 
 // LambdaErrorResponse is the representation of an error - https://medium.com/@sgarcez/error-handling-with-api-gateway-and-go-lambda-functions-fe0e10808732
