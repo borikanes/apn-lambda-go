@@ -13,6 +13,7 @@ import (
         "log"
         "net/http"
         "os"
+        "strconv"
         "time"
 
 )
@@ -61,42 +62,42 @@ type LambdaResponse struct {
     StatusCode string `json:"statusCode"`
 }
 
-// // LambdaErrorResponse is the representation of an error - https://medium.com/@sgarcez/error-handling-with-api-gateway-and-go-lambda-functions-fe0e10808732
-// type LambdaErrorResponse struct {
-// 	statusCode    string
-// 	message string
-// }
-//
-// func (e LambdaErrorResponse) Error() string {
-// 	b, err := json.Marshal(e)
-// 	if err != nil {
-// 		log.Println("cannot marshal Error:", e)
-// 		panic(err)
-// 	}
-// 	return string(b[:])
-// }
-//
-// // MarshalJSON encoding
-// func (e LambdaErrorResponse) MarshalJSON() ([]byte, error) {
-// 	return json.Marshal(&struct {
-// 		StatusCode string `json:"statusCode"`
-// 		Message  string `json:"message"`
-// 	}{
-// 		StatusCode: e.statusCode,
-// 		Message:  e.message,
-// 	})
-// }
+// LambdaErrorResponse is the representation of an error - https://medium.com/@sgarcez/error-handling-with-api-gateway-and-go-lambda-functions-fe0e10808732
+type LambdaErrorResponse struct {
+	statusCode    int
+	message string
+}
+
+func (e LambdaErrorResponse) Error() string {
+	b, err := json.Marshal(e)
+	if err != nil {
+		log.Println("cannot marshal Error:", e)
+		panic(err)
+	}
+	return string(b[:])
+}
+
+// MarshalJSON encoding
+func (e LambdaErrorResponse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		StatusCode int `json:"statusCode"`
+		Message  string `json:"message"`
+	}{
+		StatusCode: e.statusCode,
+		Message:  e.message,
+	})
+}
 
 // HandleLambdaEvent is the lambda event lambda
-func HandleLambdaEvent(event EventPayload) (LambdaResponse, error/**LambdaErrorResponse*/) {
+func HandleLambdaEvent(event EventPayload) (LambdaResponse, *LambdaErrorResponse) {
     log.Printf("Message: %s || Device Token: %s", event.Message, event.DeviceToken)
 
     apsBodyPayload := APSBodyPayload{Alert: event.Message, Sound: "default"}
     apnRequest, err := formRequestObject(APSPayload {Aps: apsBodyPayload}, event.DeviceToken, event.BundleID)
     if err != nil {
         log.Printf("Error forming request object, see below for more info")
-        // error := &LambdaErrorResponse{statusCode: "500", message: "Error forming request object"}
-        return LambdaResponse{}, fmt.Errorf("Error forming request object. code: 500")
+        lambdaError := &LambdaErrorResponse{statusCode: 500, message: "Error forming request object"}
+        return LambdaResponse{}, lambdaError
     }
 
     // Send request
@@ -110,18 +111,21 @@ func HandleLambdaEvent(event EventPayload) (LambdaResponse, error/**LambdaErrorR
         // Issue with token generation
         if generateTokenError != nil {
             log.Printf("Error in generating token when request to APN is 403. Error => %s", generateTokenError.Error())
-            return LambdaResponse{}, fmt.Errorf("Error generating token when trying to refresh. code: 500")
+            lambdaError := &LambdaErrorResponse{statusCode: 500, message: "Error generating token when trying to refresh"}
+            return LambdaResponse{}, lambdaError
         }
         // Resend request and reassign statusCode and err.
         statusCode, err = sendRequest(apnRequest)
     }
     // If statusCode is not 200 just return error to client.
     if statusCode != http.StatusOK {
-        return LambdaResponse{}, fmt.Errorf("Error generating token when trying to refresh. code: %d", statusCode)
+        log.Printf("Notification request returned a non 200 statusCode")
+        lambdaError := &LambdaErrorResponse{statusCode: statusCode, message: "Request wasnt successful"}
+        return LambdaResponse{}, lambdaError
     }
 
     // if response is a 200
-    return LambdaResponse{Message: "Notification sent successfully", StatusCode: "200", Base64Encoded: false, Headers: map[string]string{}}, nil
+    return LambdaResponse{Message: "Notification sent successfully", StatusCode: 200, Base64Encoded: false, Headers: map[string]string{}}, nil
 }
 
 func generateJWTToken(privateKeyPath string) (string, error) {
