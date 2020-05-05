@@ -6,6 +6,7 @@ import (
         "crypto/x509"
         "encoding/json"
         "encoding/pem"
+        "errors"
         "fmt"
         "github.com/aws/aws-lambda-go/lambda"
         "github.com/gbrlsnchs/jwt"
@@ -61,42 +62,15 @@ type LambdaResponse struct {
     StatusCode int `json:"statusCode"`
 }
 
-// LambdaErrorResponse is the representation of an error - https://medium.com/@sgarcez/error-handling-with-api-gateway-and-go-lambda-functions-fe0e10808732
-type LambdaErrorResponse struct {
-	statusCode    int
-	message string
-}
-
-func (e LambdaErrorResponse) Error() string {
-	b, err := json.Marshal(e)
-	if err != nil {
-		log.Println("cannot marshal Error:", e)
-		panic(err)
-	}
-	return string(b[:])
-}
-
-// MarshalJSON encoding
-func (e LambdaErrorResponse) MarshalJSON() ([]byte, error) {
-	return json.Marshal(&struct {
-		StatusCode int `json:"statusCode"`
-		Message  string `json:"message"`
-	}{
-		StatusCode: e.statusCode,
-		Message:  e.message,
-	})
-}
-
 // HandleLambdaEvent is the lambda event lambda
-func HandleLambdaEvent(event EventPayload) (LambdaResponse, *LambdaErrorResponse) {
-    log.Printf("Message: %s || Device Token: %s", event.Message, event.DeviceToken)
+func HandleLambdaEvent(event EventPayload) (LambdaResponse, error) {
+    log.Printf("Message: %s || Device Token: %s || BundleID: %s", event.Message, event.DeviceToken, event.BundleID)
 
     apsBodyPayload := APSBodyPayload{Alert: event.Message, Sound: "default"}
     apnRequest, err := formRequestObject(APSPayload {Aps: apsBodyPayload}, event.DeviceToken, event.BundleID)
     if err != nil {
         log.Printf("Error forming request object, see below for more info")
-        lambdaError := &LambdaErrorResponse{statusCode: 500, message: "Error forming request object"}
-        return LambdaResponse{}, lambdaError
+        return LambdaResponse{}, errors.New("Error forming request object. 500 Error")
     }
 
     // Send request
@@ -110,8 +84,7 @@ func HandleLambdaEvent(event EventPayload) (LambdaResponse, *LambdaErrorResponse
         // Issue with token generation
         if generateTokenError != nil {
             log.Printf("Error in generating token when request to APN is 403. Error => %s", generateTokenError.Error())
-            lambdaError := &LambdaErrorResponse{statusCode: 500, message: "Error generating token when trying to refresh"}
-            return LambdaResponse{}, lambdaError
+            return LambdaResponse{}, errors.New("Error generating token when trying to refresh. 500 Error")
         }
         // Resend request and reassign statusCode and err.
         statusCode, err = sendRequest(apnRequest)
@@ -119,8 +92,16 @@ func HandleLambdaEvent(event EventPayload) (LambdaResponse, *LambdaErrorResponse
     // If statusCode is not 200 just return error to client.
     if statusCode != http.StatusOK {
         log.Printf("Notification request returned a non 200 statusCode")
-        lambdaError := &LambdaErrorResponse{statusCode: statusCode, message: "Request wasnt successful"}
-        return LambdaResponse{}, lambdaError
+        switch statusCode {
+        case http.StatusBadRequest:
+            return LambdaResponse{}, fmt.Errorf("Something is wrong with the request sent. %d Error", statusCode)
+        case http.StatusForbidden:
+            return LambdaResponse{}, fmt.Errorf("Token must have expired and the refresh did not work. %d Error", statusCode)
+        case http.StatusNotFound:
+            return LambdaResponse{}, fmt.Errorf("Path not found, maybe the device token is invalid or you broke something sucker. %d Error", statusCode)
+        default:
+            return LambdaResponse{}, fmt.Errorf("Request wasnt successful. %d Error", statusCode)
+        }
     }
 
     // if response is a 200
@@ -206,11 +187,13 @@ func formRequestObject(payload APSPayload, deviceToken string, bundleID string) 
 // 404 - {"reason":"BadPath"}
 func sendRequest(request *http.Request) (int, error) {
     request.Header.Set("authorization", "Bearer "+jwtToken)
+    log.Printf("Request sent to APN %+v", request)
     client := &http.Client {}
     response, err := client.Do(request)
     if err != nil {
         return 500, err
     }
+    // print response body
     // bodyBytes, _ := ioutil.ReadAll(response.Body)
     // log.Println(string(bodyBytes))
     defer response.Body.Close()
@@ -221,7 +204,7 @@ func sendRequest(request *http.Request) (int, error) {
 
 func main() {
     // Local development
-    // lambdaResponse, error := HandleLambdaEvent(EventPayload{Message: "MESSAGE!!!", DeviceToken: "1234567890", BundleID: ""})
+    // lambdaResponse, error := HandleLambdaEvent(EventPayload{Message: "MESSAGE!!!", DeviceToken: "123456789", BundleID: "com.apple.develop"})
     // if error != nil {
     //     fmt.Println(error)
     // }
