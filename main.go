@@ -74,7 +74,7 @@ func HandleLambdaEvent(event EventPayload) (LambdaResponse, error) {
     }
 
     // Send request
-    statusCode, err := sendRequest(apnRequest)
+    statusCode, sendRequestErr := sendRequest(apnRequest)
 
     // Token expired, refresh and resend request
     if statusCode == http.StatusForbidden {
@@ -87,11 +87,12 @@ func HandleLambdaEvent(event EventPayload) (LambdaResponse, error) {
             return LambdaResponse{}, errors.New("Error generating token when trying to refresh. 500 Error")
         }
         // Resend request and reassign statusCode and err.
-        statusCode, err = sendRequest(apnRequest)
+        statusCode, sendRequestErr = sendRequest(apnRequest)
     }
     // If statusCode is not 200 just return error to client.
     if statusCode != http.StatusOK {
         log.Printf("Notification request returned a non 200 statusCode")
+        log.Printf("Error Deets %s", sendRequestErr)
         switch statusCode {
         case http.StatusBadRequest:
             return LambdaResponse{}, fmt.Errorf("Something is wrong with the request sent. %d Error", statusCode)
@@ -162,9 +163,10 @@ func formRequestObject(payload APSPayload, deviceToken string, bundleID string) 
 
     // get endpoint based on environment
     baseEndpoint := productionBaseURL
-    if os.Getenv("ENV") == "QA" {
+    if bundleID == "me.borikanes.SongUpdaterQA" {
         baseEndpoint = sandboxBaseURL
     }
+    // baseEndpoint := sandboxBaseURL
 
     // create request object
     fullURL := baseEndpoint + "3/device/" + deviceToken
