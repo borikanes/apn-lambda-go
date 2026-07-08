@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A single Go AWS Lambda that sends APN (Apple Push Notification) pushes for the "Song Updater" iOS app. It is invoked over API Gateway (`ho7won2i0j`, path `/send-notifications`) by the `fetch-new-song` lambda in the `spotify-lambdas` repo (`/Users/borikanes/Code/spotify-lambdas`).
+A single Go AWS Lambda (`APNProd`) that sends APN (Apple Push Notification) pushes for the "Song Updater" iOS app. It is invoked over API Gateway (`ho7won2i0j`, path `/send-notifications`) by the `fetch-new-song` lambda in the `spotify-lambdas` repo (`/Users/borikanes/Code/spotify-lambdas`).
 
-The same code is deployed to **two** lambda functions, selected by an API Gateway stage variable (`lambdaFunctionName`):
+`APNProd` serves **both** environments — the APNs endpoint is chosen **by bundle ID** in `formRequestObject` (main.go):
 
-| Function | Stage | APNs endpoint | App |
-|---|---|---|---|
-| `APNProd` | prod | `api.push.apple.com` | `me.borikanes.SongUpdater` |
-| `APNTester` | QA | `api.development.push.apple.com` (sandbox) | `me.borikanes.SongUpdaterQA` |
+| Bundle ID | APNs endpoint |
+|---|---|
+| `me.borikanes.SongUpdaterQA` | `api.development.push.apple.com` (sandbox) |
+| anything else (`me.borikanes.SongUpdater`) | `api.push.apple.com` (production) |
 
-The endpoint is chosen **by bundle ID** in `formRequestObject` (main.go): `me.borikanes.SongUpdaterQA` → sandbox, anything else → production.
+Both API Gateway stages (prod and QA) route to `APNProd` via the `lambdaFunctionName` stage variable. A second function (`APNTester`) used to serve the QA stage but was consolidated away in July 2026 — if a stage ever routes to a missing function, check that stage's `lambdaFunctionName` variable and that its `deploymentId` is a post-2021 snapshot (older snapshots hardcode the function name instead of using the stage variable).
 
 ## Build & Deploy
 
